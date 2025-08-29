@@ -1,0 +1,214 @@
+"use client";
+import React, { useEffect, useState } from "react";
+import { Globe, ChevronRight, Search } from "lucide-react";
+import { Website } from "@/types/website";
+import { apiClient } from "@/lib/apiClient";
+import { toast } from "sonner";
+import SearchInput from "../search-input";
+import { Button } from "../ui/button";
+import { Article } from "@/types/article";
+import { useSession } from "next-auth/react";
+import { usePathname, useSearchParams } from "next/navigation";
+import dynamic from "next/dynamic";
+import { Skeleton } from "../ui/skeleton";
+
+const PaginationComponent = dynamic(() => import("../pagination-controller"));
+const PerRowSelect = dynamic(() => import("../per-row-select"));
+const WebsiteArticleItem = dynamic(() => import("./website-article-item"));
+
+interface Props {
+  websites: Website[];
+}
+
+const WebsiteArticle = ({ websites }: Props) => {
+  const [articles, setArticles] = useState<Article[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedWebsite, setSelectedWebsite] = useState<Website | null>(null);
+  const [totalCount, settotalCount] = useState(0);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const { data: session } = useSession();
+  const token = session?.user.accessToken as string;
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
+  const perRow = searchParams.get("perRow") || 10;
+
+  useEffect(() => {
+    if (!selectedWebsite) return;
+    setIsLoading(true);
+    setError(null);
+
+    const fetchArticles = async () => {
+      try {
+        const page = searchParams.get("page") || 1;
+        const search = searchParams.get("query") || "";
+        const perRow = searchParams.get("perRow") || 10;
+
+        const url = `/api/admin/articles?page=${page}&perRow=${perRow}&search=${search}`;
+        const { data, error } = await apiClient.get(url, {
+          headers: {
+            "x-api-key": process.env.NEXT_PUBLIC_WEBSITE_API_KEY as string,
+          },
+          baseUrl: selectedWebsite.backendUrl,
+        });
+        if (error) {
+          throw new Error(error);
+        }
+
+        setArticles(data.articles);
+        settotalCount(data.totalCount);
+      } catch (err: any) {
+        setError("Failed to fetch articles. Please try again.");
+        toast.error("Failed to fetch articles. Please try again.");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchArticles();
+  }, [selectedWebsite, searchParams]); // Only trigger on searchParams change
+
+  useEffect(() => {
+    return () => {
+      setSelectedWebsite(null);
+    };
+  }, []);
+
+  const handleWebsiteSelect = (website: Website) => {
+    window.history.replaceState(null, "", pathname);
+    setSelectedWebsite(website);
+  };
+
+  if (!selectedWebsite) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center p-6">
+        <div className="max-w-md w-full bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <div className="text-center mb-6">
+            <div className="w-12 h-12 bg-blue-50 rounded-lg flex items-center justify-center mx-auto mb-4">
+              <Globe className="w-6 h-6 text-blue-600" />
+            </div>
+            <h2 className="text-xl font-bold text-gray-800">
+              Select a Website
+            </h2>
+            <p className="text-gray-600 mt-1">
+              Choose a website to manage its articles
+            </p>
+          </div>
+          {/* Search Bar */}
+          <div className="mb-4">
+            <div className="relative">
+              <SearchInput
+                placeholder="Search website"
+                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <Search className="w-5 h-5 text-gray-400 absolute left-3 top-2.5" />
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            {websites.map((website) => (
+              <button
+                key={website.id}
+                onClick={() => handleWebsiteSelect(website)}
+                className="w-full flex items-center p-3 rounded-lg border border-gray-200 hover:border-blue-500 hover:bg-blue-50 transition-colors"
+              >
+                <div className="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center mr-3">
+                  <Globe className="w-5 h-5 text-blue-600" />
+                </div>
+                <span className="text-gray-700 font-medium">
+                  {website.name}
+                </span>
+                <ChevronRight className="w-5 h-5 text-gray-400 ml-auto" />
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <h1 className="text-2xl font-bold text-gray-800">Articles</h1>
+            <span className="px-2 py-1 bg-blue-50 text-blue-700 rounded-md text-sm font-medium">
+              {selectedWebsite?.name}
+            </span>
+          </div>
+          <p className="text-gray-600">
+            Manage articles for {selectedWebsite?.name}
+          </p>
+        </div>
+        <div className="flex gap-3">
+          <SearchInput
+            placeholder="Search your articles"
+            className="md:min-w-96"
+          />
+          <Button variant="outline" onClick={() => setSelectedWebsite(null)}>
+            Change Website
+          </Button>
+        </div>
+      </div>
+
+      {/* Loading Skeleton */}
+      {isLoading && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {Array.from({ length: 6 }).map((_, index) => (
+            <div
+              key={index}
+              className="bg-white rounded-lg shadow-sm border border-gray-200"
+            >
+              <div className="p-4">
+                <Skeleton className="h-6 w-3/4 mb-4" />
+                <Skeleton className="h-4 w-full mb-2" />
+                <Skeleton className="h-4 w-full mb-2" />
+                <Skeleton className="h-4 w-1/2 mb-4" />
+                <div className="flex items-center justify-between">
+                  <Skeleton className="h-8 w-20 rounded-md" />
+                  <Skeleton className="h-8 w-8 rounded-md" />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Error Message */}
+      {error && <div className="text-center py-4 text-red-600">{error}</div>}
+
+      {/* Articles List */}
+      {!isLoading && (
+        <>
+          {articles.length < 1 ? (
+            <div className="text-center my-10">No articles found</div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {articles.map((article) => (
+                <WebsiteArticleItem
+                  website={selectedWebsite as Website}
+                  article={article}
+                  key={article.id}
+                />
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Pagination and Rows Per Page */}
+      {totalCount > 1 && (
+        <div className="my-5 space-y-3 md:space-y-0 md:flex md:items-center md:justify-between">
+          <PerRowSelect />
+          {totalCount > Number(perRow) && (
+            <div>
+              <PaginationComponent totalResults={totalCount} />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default WebsiteArticle;

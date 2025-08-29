@@ -1,0 +1,411 @@
+"use client";
+import { zodResolver } from "@hookform/resolvers/zod";
+import React, { Fragment, useCallback, useState, useTransition } from "react";
+import { z } from "zod";
+import { format } from "date-fns";
+import { AlertCircle, CalendarIcon, FileCheck, Upload } from "lucide-react";
+import { useForm } from "react-hook-form";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Input } from "@/components/ui/input";
+import { toast } from "sonner";
+import { useSession } from "next-auth/react";
+import { BASE_URL, toastOptions } from "@/lib/constant";
+import SubmitButton from "@/components/submit-button";
+import { AdType } from "@/types/ads";
+import { useRouter, useSearchParams } from "next/navigation";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { useDropzone } from "react-dropzone";
+import { Label } from "@/components/ui/label";
+import { httpStatusCode } from "@/types/http";
+
+const MAX_FILE_SIZE = 4 * 1024 * 1024;
+
+const AdSchema = z.object({
+  title: z
+    .string()
+    .min(4, { message: "Title must be atleast 4 characters long." })
+    .max(50, { message: "Title should be less than 50 characters." }),
+  targetUrl: z.string().url({ message: "Please provide valid targetUrl url" }),
+  startDate: z.date({
+    required_error: "Start date is required.",
+  }),
+  endDate: z.date({
+    required_error: "End date is required.",
+  }),
+  isRightSideBar: z.boolean({ message: "RightSideBar is required" }),
+  order: z.number({ message: "Please selec order" }),
+  imageUrl: z.string().url({ message: "Please provide a url" }),
+});
+
+export type adsFormValue = z.infer<typeof AdSchema>;
+
+interface Props {
+  ad: AdType;
+}
+
+export function UpdateWebsiteArticleAdsForm({ ad }: Props) {
+  const form = useForm<adsFormValue>({
+    resolver: zodResolver(AdSchema),
+    defaultValues: {
+      title: ad.title,
+      targetUrl: ad.targetUrl,
+      endDate: new Date(ad.endDate),
+      startDate: new Date(ad.startDate),
+      isRightSideBar: ad.isRightSideBar,
+      order: ad.order,
+      imageUrl: ad.imageUrl,
+    },
+  });
+  const [isPending, startTransition] = useTransition();
+  const { data: session } = useSession();
+  const token = session?.user.accessToken as string;
+  const [isEditingImage, setIsEditingImage] = useState(false);
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [file, setfile] = useState<File | null>(null);
+
+  const searchParams = useSearchParams();
+  const websiteId = searchParams.get("websiteId");
+  const { back } = useRouter();
+
+  const onDrop = useCallback((acceptedFiles: File[], rejectedFiles: any[]) => {
+    if (rejectedFiles.length > 0) {
+      const rejection = rejectedFiles[0];
+      if (rejection.errors[0].code === "file-too-large") {
+        setError("File is too large. Maximum size is 4 MB.");
+      } else if (rejection.errors[0].code === "file-invalid-type") {
+        setError("Invalid file type. Please upload a CSV file.");
+      } else {
+        setError("Error uploading file. Please try again.");
+      }
+      setFileName(null);
+    } else if (acceptedFiles.length > 0) {
+      const file = acceptedFiles[0];
+      setFileName(file.name);
+      setfile(file);
+      setError(null);
+    }
+  }, []);
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    accept: {
+      "image/*": [".jpg", ".jpeg", ".png", ".gif", ".webp"],
+    },
+    maxSize: MAX_FILE_SIZE,
+    multiple: false,
+  });
+
+  function onSubmit(data: adsFormValue) {
+    startTransition(async () => {
+      const formData = new FormData();
+      formData.set("title", data.title);
+      formData.set("targetUrl", data.targetUrl);
+      if (isEditingImage) {
+        formData.set("image", file as any);
+      }
+      formData.set("isRightSideBar", JSON.stringify(data.isRightSideBar));
+      formData.set("isNewImage", JSON.stringify(isEditingImage));
+      formData.set("adsId", ad.id);
+      formData.set("order", JSON.stringify(data.order));
+      formData.set("imageUrl", data.imageUrl);
+      formData.set("startDate", format(data.startDate, "yyyy-MM-dd"));
+      formData.set("endDate", format(data.endDate, "yyyy-MM-dd"));
+
+      const response = await fetch(
+        `${BASE_URL}/api/website-ads/articles/ads/${websiteId}`,
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          body: formData,
+        },
+      );
+      const { statusCode, message } = await response.json();
+      if (statusCode !== httpStatusCode.OK) {
+        toast.error(message, toastOptions);
+      } else {
+        toast.success(message, toastOptions);
+        form.reset();
+        back();
+      }
+    });
+  }
+
+  return (
+    <Form {...form}>
+      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <FormField
+            control={form.control}
+            name="title"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Title</FormLabel>
+                <FormControl>
+                  <Input placeholder="Enter title" {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name="targetUrl"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Target Url</FormLabel>
+                <FormControl>
+                  <Input placeholder="Enter target url" {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <FormField
+            control={form.control}
+            name="startDate"
+            render={({ field }) => (
+              <FormItem className="flex flex-col">
+                <FormLabel>Start Date</FormLabel>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <FormControl>
+                      <Button
+                        variant={"outline"}
+                        className={cn(
+                          "pl-3 text-left font-normal",
+                          !field.value && "text-muted-foreground",
+                        )}
+                      >
+                        {field.value ? (
+                          format(field.value, "PPP")
+                        ) : (
+                          <span>Pick a date</span>
+                        )}
+                        <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                      </Button>
+                    </FormControl>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={field.value as any}
+                      onSelect={field.onChange}
+                      disabled={(date) =>
+                        date < new Date(new Date().setHours(0, 0, 0, 0)) ||
+                        date < new Date("1900-01-01")
+                      }
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name="endDate"
+            render={({ field }) => (
+              <FormItem className="flex flex-col">
+                <FormLabel>End Date</FormLabel>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <FormControl>
+                      <Button
+                        variant={"outline"}
+                        className={cn(
+                          "pl-3 text-left font-normal",
+                          !field.value && "text-muted-foreground",
+                        )}
+                      >
+                        {field.value ? (
+                          format(field.value, "PPP")
+                        ) : (
+                          <span>Pick a date</span>
+                        )}
+                        <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                      </Button>
+                    </FormControl>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={field.value as any}
+                      onSelect={field.onChange}
+                      disabled={(date) =>
+                        date < new Date(new Date().setHours(0, 0, 0, 0)) ||
+                        date < new Date("1900-01-01")
+                      }
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name="isRightSideBar"
+            render={({ field }) => (
+              <FormItem className="space-y-3">
+                <FormLabel>Where would you like to place the ad?</FormLabel>
+                <FormControl>
+                  <RadioGroup
+                    onValueChange={(value) => field.onChange(JSON.parse(value))}
+                    defaultValue={JSON.stringify(field.value)}
+                    className="flex space-x-2"
+                  >
+                    <FormItem className="flex items-center space-x-3 space-y-0">
+                      <FormControl>
+                        <RadioGroupItem value="true" />
+                      </FormControl>
+                      <FormLabel className="font-normal">
+                        Right Sidebar
+                      </FormLabel>
+                    </FormItem>
+                    <FormItem className="flex items-center space-x-3 space-y-0">
+                      <FormControl>
+                        <RadioGroupItem value="false" />
+                      </FormControl>
+                      <FormLabel className="font-normal">
+                        Left Sidebar
+                      </FormLabel>
+                    </FormItem>
+                  </RadioGroup>
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name="order"
+            render={({ field }) => (
+              <FormItem className="space-y-3">
+                <FormLabel>Select order of the ad</FormLabel>
+                <FormControl>
+                  <RadioGroup
+                    onValueChange={(value) => field.onChange(JSON.parse(value))}
+                    defaultValue={JSON.stringify(field.value)}
+                    className="flex space-x-2"
+                  >
+                    <FormItem className="flex items-center space-x-3 space-y-0">
+                      <FormControl>
+                        <RadioGroupItem value="1" />
+                      </FormControl>
+                      <FormLabel className="font-normal">1</FormLabel>
+                    </FormItem>
+                    <FormItem className="flex items-center space-x-3 space-y-0">
+                      <FormControl>
+                        <RadioGroupItem value="2" />
+                      </FormControl>
+                      <FormLabel className="font-normal">2</FormLabel>
+                    </FormItem>
+                  </RadioGroup>
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        </div>
+        <Fragment>
+          <div className="grid gap-4">
+            <h1>Would you like to change the existing image?</h1>
+            <RadioGroup
+              onValueChange={(value) => setIsEditingImage(value === "yes")}
+              defaultValue={isEditingImage ? "yes" : "no"}
+              className="flex items-center space-x-5"
+            >
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="yes" id="r1" />
+                <Label htmlFor="r1">Yes</Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="no" id="r2" />
+                <Label htmlFor="r2">No</Label>
+              </div>
+            </RadioGroup>{" "}
+          </div>
+
+          {!isEditingImage && (
+            <FormField
+              control={form.control}
+              name="imageUrl"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Image Url</FormLabel>
+                  <FormControl>
+                    <Input
+                      disabled
+                      placeholder="Enter your article image url"
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          )}
+          {isEditingImage && (
+            <div
+              {...getRootProps()}
+              className={`p-8 border-2 border-dashed rounded-lg text-center cursor-pointer transition-colors
+        ${isDragActive ? "border-primary bg-primary/10" : "border-gray-300 hover:border-primary"}
+        ${error ? "border-red-500 bg-red-50" : ""}
+      `}
+            >
+              <input {...getInputProps()} />
+              <div className="space-y-4">
+                {error ? (
+                  <AlertCircle className="mx-auto h-12 w-12 text-red-500" />
+                ) : fileName ? (
+                  <FileCheck className="mx-auto h-12 w-12 text-green-500" />
+                ) : (
+                  <Upload className="mx-auto h-12 w-12 text-gray-400" />
+                )}
+                <p className="text-sm text-gray-600">
+                  {error ? (
+                    <span className="text-red-500">{error}</span>
+                  ) : fileName ? (
+                    <span className="text-green-500">
+                      File selected: {fileName}
+                    </span>
+                  ) : isDragActive ? (
+                    "Drop the CSV file here..."
+                  ) : (
+                    "Drag 'n' drop an image file here, or click to select one"
+                  )}
+                </p>
+                <p className="text-xs text-gray-400">(Max file size: 4 MB)</p>
+              </div>
+            </div>
+          )}
+        </Fragment>
+
+        <SubmitButton isPending={isPending}>Submit</SubmitButton>
+      </form>
+    </Form>
+  );
+}
